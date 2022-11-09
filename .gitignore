@@ -1,0 +1,4 @@
+/.vscode
+/build
+/mona.egg-info
+__pycache__/
