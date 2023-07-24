@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "mona"
-version = "0.1.1"
+version = "0.2.0"
 readme = "README.md"
 requires-python = ">=3.10"
 license = { text = "MIT" }
@@ -18,49 +18,6 @@ repository = "https://www.github.com/bdholder/mona"
 [tool.black]
 line-length = 100
 
-[tool.pylint."MESSAGES CONTROL"]
-disable = [
-    "anomalous-backslash-in-string", # W1401: covered by Pylance
-    "arguments-differ", # W0221
-    "attribute-defined-outside-init", # W0201
-    "bad-option-value", # E0012
-    "broad-except", # W0703
-    "c-extension-no-member", # I1101
-    "duplicate-code", # R0801
-    "eq-without-hash", # W1641
-    "fixme", # W0511
-    "import-error", # E0401
-    "import-self", # W0406
-    "invalid-name", # C0103
-    "invalid-str-codec", # W1646
-    "line-too-long", # C0301
-    "locally-disabled", # I0011
-    "logging-fstring-interpolation", # W1203
-    "missing-class-docstring", # C0115
-    "missing-function-docstring", # C0116
-    "missing-module-docstring", # C0114
-    "no-init", # W0232
-    "no-member", # E1101
-    "no-name-in-module", # E0611
-    "no-self-use", # R0201
-    "signature-differs", # W0222
-    "suppressed-message", # I0020
-    "too-few-public-methods", # R0903
-    "too-many-ancestors", # R0901
-    "too-many-arguments", # R0913
-    "too-many-boolean-expressions", # R0916
-    "too-many-branches", # R0912
-    "too-many-instance-attributes", # R0902
-    "too-many-lines", # C0302
-    "too-many-locals", # R0914
-    "too-many-nested-blocks", # R1702
-    "too-many-public-methods", # R0904
-    "too-many-return-statements", # R0911
-    "too-many-statements", # R0915
-    "undefined-variable", # E0602: covered by Pylance
-    "wrong-import-order", # C0411
-]
-
 [tool.pyright]
 extraPaths = [
     "mona",
@@ -71,3 +28,7 @@ typeCheckingMode = "strict"
 
 [tool.pytest.ini_options]
 pythonpath = ["."]
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"

@@ -5,26 +5,24 @@ from types import TracebackType
 from typing import (
     Any,
     Callable,
+    cast,
     Final,
+    final,
     Generic,
+    Literal,
     NoReturn,
-    Optional,
+    overload,
     ParamSpec,
     TypeGuard,
     TypeVar,
-    Union,
-    cast,
-    final,
 )
 
 
-E = TypeVar("E", covariant=True)
-F = TypeVar("F")
-M = TypeVar("M")
+E = TypeVar("E", covariant=True, bound=BaseException)
+F = TypeVar("F", bound=BaseException)
 P = ParamSpec("P")
 T = TypeVar("T", covariant=True)
 U = TypeVar("U")
-V = TypeVar("V")
 X = TypeVar("X", bound=BaseException)
 
 
@@ -42,10 +40,10 @@ class Result(Generic[T, E], metaclass=ABCMeta):
     @abstractmethod
     def __exit__(
         self: "Result[AbstractContextManager[Any], E]",
-        exc_type: Optional[type[BaseException]],
-        exc_val: Optional[BaseException],
-        exc_tb: Optional[TracebackType],
-    ) -> Optional[bool]:
+        exc_type: type[BaseException] | None,
+        exc_val: BaseException | None,
+        exc_tb: TracebackType | None,
+    ) -> bool | None:
         ...
 
     @abstractmethod
@@ -60,11 +58,11 @@ class Result(Generic[T, E], metaclass=ABCMeta):
     def apply(self, f: Callable[[T], None]) -> "Result[T, E]":
         ...
 
-    def cast(self, tango: type[U]) -> "Result[U, E]":
-        return cast(tango, self)  # type: ignore
+    def cast(self, t: type[U]) -> "Result[U, E]":
+        return cast("Result[t, E]", self)
 
     @abstractmethod
-    def get(self, default: T) -> T:  # type: ignore
+    def get(self, default: T) -> T:  # pyright: ignore [reportGeneralTypeIssues]
         ...
 
     @abstractmethod
@@ -76,19 +74,51 @@ class Result(Generic[T, E], metaclass=ABCMeta):
         ...
 
     @abstractmethod
-    def or_else(self, f: Callable[[E], "Result[T, F]"]) -> "Result[T, F]":
+    def or_else(self, f: Callable[[E], "Result[U, F]"]) -> "Result[T | U, F]":
         ...
 
-    # Using "Ok[T]" | NoReturn here causes TypeError: unsupported operand type(s) for |: 'str' and '_SpecialForm'
     @abstractmethod
-    def or_raise(self, msg: Optional[str] = None) -> Union["Ok[T]", NoReturn]:
+    def or_raise(self, msg: str | None = None) -> "Ok[T]":
         ...
 
-    def _raise(self, exception: type[BaseException], cause: Any) -> NoReturn:
-        raise exception from cause if isinstance(cause, BaseException) else exception(repr(cause))
+    @overload
+    @abstractmethod
+    def or_try(self, f: Callable[P, U], *args: P.args, **kwargs: P.kwargs) -> "Ok[T | U]":
+        ...
+
+    @overload
+    @abstractmethod
+    def or_try(
+        self,
+        f: Callable[P, U],
+        *args: P.args,
+        catch: type[X] | tuple[type[X], ...],  # pyright: ignore [reportGeneralTypeIssues]
+        **kwargs: P.kwargs,
+    ) -> "Result[T | U, X]":
+        ...
+
+    # The catch technique used here is not unsound; it's simply inexpressible in the current type
+    # annotation system. Pyright, however, despite disapproving, makes the correct inferences.
+    @abstractmethod
+    def or_try(
+        self,
+        f: Callable[P, U],
+        *args: P.args,
+        catch: type[X] | tuple[type[X], ...] = (),  # pyright: ignore [reportGeneralTypeIssues]
+        **kwargs: P.kwargs,
+    ) -> "Result[T | U, X]":
+        ...
+
+    @abstractmethod
+    def or_use(self, value: U) -> "Ok[T | U]":  # pyright: ignore [reportGeneralTypeIssues]
+        ...
 
     def transform(self, f: Callable[["Result[T, E]"], U]) -> U:
         return f(self)
+
+    @abstractmethod
+    def unwrap(self) -> T:
+        ...
 
 
 @final
@@ -105,17 +135,17 @@ class Ok(Result[T, Any]):
 
     def __exit__(
         self: "Ok[AbstractContextManager[Any]]",
-        exc_type: Optional[type[BaseException]],
-        exc_val: Optional[BaseException],
-        exc_tb: Optional[TracebackType],
-    ) -> Optional[bool]:
+        exc_type: type[BaseException] | None,
+        exc_val: BaseException | None,
+        exc_tb: TracebackType | None,
+    ) -> bool | None:
         return self._value.__exit__(exc_type, exc_val, exc_tb)
 
     def __init__(self, value: T):
         self._value = value
 
     def __repr__(self) -> str:
-        return f"Ok({repr(self._value)})"
+        return f"Ok({self._value!r})"
 
     def and_then(self, f: Callable[[T], Result[U, F]]) -> Result[U, F]:
         return f(self._value)
@@ -124,7 +154,10 @@ class Ok(Result[T, Any]):
         f(self._value)
         return self
 
-    def get(self, default: T) -> T:  # type: ignore
+    def cast(self, t: type[U]) -> "Ok[U]":
+        return cast("Ok[t]", self)
+
+    def get(self, default: T) -> T:  # pyright: ignore [reportGeneralTypeIssues]
         return self._value
 
     def map(self, f: Callable[[T], U]) -> "Ok[U]":
@@ -133,11 +166,26 @@ class Ok(Result[T, Any]):
     def map_err(self, f: Callable[[Any], Any]) -> "Ok[T]":
         return self
 
-    def or_else(self, f: Callable[[Any], Result[T, Any]]) -> "Ok[T]":
+    def or_else(self, f: Callable[[Any], Result[Any, Any]]) -> "Ok[T]":
         return self
 
-    def or_raise(self, msg: Optional[str] = None) -> "Ok[T]":
+    def or_try(
+        self,
+        f: Callable[P, Any],
+        *args: P.args,
+        catch: type[X] | tuple[type[X], ...] = (),  # pyright: ignore [reportGeneralTypeIssues]
+        **kwargs: P.kwargs,
+    ) -> "Ok[T]":
         return self
+
+    def or_use(self, value: Any) -> "Ok[T]":  # pyright: ignore [reportGeneralTypeIssues]
+        return self
+
+    def or_raise(self, msg: str | None = None) -> "Ok[T]":
+        return self
+
+    def unwrap(self) -> T:
+        return self._value
 
     @property
     def value(self) -> T:
@@ -158,22 +206,25 @@ class Err(Result[Any, E]):
 
     def __exit__(
         self,
-        exc_type: Optional[type[BaseException]],
-        exc_val: Optional[BaseException],
-        exc_tb: Optional[TracebackType],
-    ) -> Optional[bool]:
+        exc_type: type[BaseException] | None,
+        exc_val: BaseException | None,
+        exc_tb: TracebackType | None,
+    ) -> bool | None:
         pass
 
     def __init__(self, error: E):
         self._error = error
 
     def __repr__(self) -> str:
-        return f"Err({repr(self._error)})"
+        return f"Err({self._error!r})"
 
     def and_then(self, f: Callable[[Any], Result[Any, Any]]) -> "Err[E]":
         return self
 
     def apply(self, f: Callable[[Any], None]) -> "Err[E]":
+        return self
+
+    def cast(self, t: type) -> "Err[E]":
         return self
 
     @property
@@ -189,17 +240,47 @@ class Err(Result[Any, E]):
     def map_err(self, f: Callable[[E], F]) -> "Err[F]":
         return Err(f(self._error))
 
-    def or_else(self, f: Callable[[E], Result[T, F]]) -> Result[T, F]:
+    def or_else(self, f: Callable[[E], Result[U, F]]) -> Result[U, F]:
         return f(self._error)
 
-    def or_raise(self, msg: Optional[str] = None) -> NoReturn:
-        result_error = ResultError(self._error) if msg is None else ResultError(self._error, msg)
-        raise result_error from self._error if isinstance(
-            self._error, BaseException
-        ) else result_error
+    @overload
+    def or_try(self, f: Callable[P, U], *args: P.args, **kwargs: P.kwargs) -> Ok[U]:
+        ...
+
+    @overload
+    def or_try(
+        self,
+        f: Callable[P, U],
+        *args: P.args,
+        catch: type[X] | tuple[type[X], ...],  # pyright: ignore [reportGeneralTypeIssues]
+        **kwargs: P.kwargs,
+    ) -> Result[U, X]:
+        ...
+
+    def or_try(
+        self,
+        f: Callable[P, U],
+        *args: P.args,
+        catch: type[X] | tuple[type[X], ...] = (),  # pyright: ignore [reportGeneralTypeIssues]
+        **kwargs: P.kwargs,
+    ) -> Result[U, X]:
+        try:
+            return Ok(f(*args, **kwargs))
+        except catch as e:
+            return Err(e)
+
+    def or_use(self, value: U) -> "Ok[U]":  # pyright: ignore [reportGeneralTypeIssues]
+        return Ok(value)
+
+    def or_raise(self, msg: str | None = None) -> NoReturn:
+        if msg is None:
+            raise ResultError() from self._error
+        raise ResultError(msg) from self._error
+
+    def unwrap(self) -> NoReturn:
+        raise ResultError("unwrapped Err") from self._error
 
 
-# This is actually somewhat dangerous since raising the "wrong" type of exception won't be flagged
 def result(
     ex: type[X], *result_args: type[X]
 ) -> Callable[[Callable[P, U]], Callable[P, Result[U, X]]]:
@@ -208,17 +289,37 @@ def result(
         def g(*args: P.args, **kwargs: P.kwargs) -> Result[U, X]:
             try:
                 return Ok(f(*args, **kwargs))
-            except (ex, *result_args) as e:  # type: ignore
-                return Err(e)  # type: ignore
+            except (ex, *result_args) as e:  # pyright: ignore
+                return Err(e)
 
         return g
 
     return inner_result
 
 
+@overload
+def is_err(r: Ok[Any]) -> Literal[False]:
+    ...
+
+
+@overload
 def is_err(r: Result[Any, E]) -> TypeGuard[Err[E]]:
+    ...
+
+
+def is_err(r: Result[Any, E]) -> TypeGuard[Err[E]] | Literal[False]:
     return isinstance(r, Err)
 
 
+@overload
+def is_ok(r: Err[Any]) -> Literal[False]:
+    ...
+
+
+@overload
 def is_ok(r: Result[T, Any]) -> TypeGuard[Ok[T]]:
+    ...
+
+
+def is_ok(r: Result[T, Any]) -> TypeGuard[Ok[T]] | Literal[False]:
     return isinstance(r, Ok)
